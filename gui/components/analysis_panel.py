@@ -1,11 +1,13 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QTableWidget,
-                             QHeaderView, QLabel, QAbstractItemView, QTableWidgetItem)
+                             QHeaderView, QLabel, QAbstractItemView,
+                             QTableWidgetItem, QSpinBox, QHBoxLayout,
+                             QPushButton)
 from PyQt5.QtCore import Qt
 import pandas as pd
 
 
 class AnalysisPanel(QWidget):
-    """数据分析结果显示面板"""
+    """数据分析结果显示面板（改进版）"""
 
     def __init__(self):
         super().__init__()
@@ -31,22 +33,21 @@ class AnalysisPanel(QWidget):
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabPosition(QTabWidget.North)
 
-        # 创建各个分析结果标签页
+        # 创建标签页
+        self.properties_table = self._create_analysis_table("字段属性")
         self.stats_table = self._create_analysis_table("统计量")
-        self.dtypes_table = self._create_analysis_table("数据类型")
-        self.unique_table = self._create_analysis_table("唯一值数量")
-        self.missing_table = self._create_analysis_table("缺失值数量")
+        self.preview_table = self._create_preview_tab()  # 数据预览标签页
 
         layout.addWidget(self.tab_widget)
 
     def _create_analysis_table(self, title):
         """创建分析结果表格"""
         table = QTableWidget()
-        table.setEditTriggers(QTableWidget.NoEditTriggers)  # 禁止编辑
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        table.verticalHeader().setVisible(False)  # 隐藏行号
+        table.verticalHeader().setVisible(False)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        table.setAlternatingRowColors(True)  # 交替行颜色
+        table.setAlternatingRowColors(True)
         table.setStyleSheet("""
             QTableWidget {
                 font-size: 12px;
@@ -57,98 +58,122 @@ class AnalysisPanel(QWidget):
                 border: 1px solid #ddd;
             }
         """)
-
         self.tab_widget.addTab(table, title)
         return table
 
+    def _create_preview_tab(self):
+        """创建数据预览标签页"""
+        preview_widget = QWidget()
+        preview_layout = QVBoxLayout(preview_widget)
+
+        # 预览控制面板
+        control_panel = QWidget()
+        control_layout = QHBoxLayout(control_panel)
+
+        control_layout.addWidget(QLabel("显示行数:"))
+        self.preview_rows_spin = QSpinBox()
+        self.preview_rows_spin.setRange(1, 1000)
+        self.preview_rows_spin.setValue(10)
+        control_layout.addWidget(self.preview_rows_spin)
+
+        self.refresh_btn = QPushButton("刷新预览")
+        self.refresh_btn.clicked.connect(self._refresh_preview)
+        control_layout.addWidget(self.refresh_btn)
+
+        control_layout.addStretch()
+        preview_layout.addWidget(control_panel)
+
+        # 预览表格
+        self.preview_table = QTableWidget()
+        self.preview_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.preview_table.setAlternatingRowColors(True)
+        preview_layout.addWidget(self.preview_table)
+
+        self.tab_widget.addTab(preview_widget, "数据预览")
+        return self.preview_table
+
     def show_analysis_results(self, results):
         """显示分析结果"""
-        # 统计量
+        # 合并字段属性（数据类型、唯一值、缺失值）
+        self._display_properties(
+            results['数据类型'],
+            results['唯一值数量'],
+            results['缺失值数量']
+        )
+
+        # 显示统计量
         self._display_stats(results['统计量'])
 
-        # 数据类型
-        self._display_dtypes(results['数据类型'])
+        # 显示数据预览
+        if hasattr(self, 'current_data'):
+            self._refresh_preview()
 
-        # 唯一值数量
-        self._display_uniques(results['唯一值数量'])
+    def _display_properties(self, dtypes, uniques, missing):
+        """显示合并后的字段属性"""
+        columns = dtypes.index.tolist()
+        self.properties_table.setRowCount(len(columns))
+        self.properties_table.setColumnCount(4)
+        self.properties_table.setHorizontalHeaderLabels(
+            ["字段名", "数据类型", "唯一值数量", "缺失值数量"])
 
-        # 缺失值数量
-        self._display_missing(results['缺失值数量'])
+        for i, col in enumerate(columns):
+            # 字段名
+            self.properties_table.setItem(i, 0, self._create_table_item(col))
+            # 数据类型
+            self.properties_table.setItem(i, 1, self._create_table_item(str(dtypes[col])))
+            # 唯一值数量
+            self.properties_table.setItem(i, 2, self._create_table_item(uniques[col]))
+            # 缺失值数量
+            self.properties_table.setItem(i, 3, self._create_table_item(missing[col]))
+
+        self.properties_table.resizeColumnsToContents()
 
     def _display_stats(self, stats_df):
         """显示统计量"""
         self.stats_table.setRowCount(stats_df.shape[0])
-        self.stats_table.setColumnCount(stats_df.shape[1] + 1)  # 增加指标名列
+        self.stats_table.setColumnCount(stats_df.shape[1] + 1)
 
-        # 设置表头
         headers = ["统计量"] + stats_df.columns.tolist()
         self.stats_table.setHorizontalHeaderLabels(headers)
 
-        # 填充数据
         for i, (stat_name, row) in enumerate(stats_df.iterrows()):
-            # 第一列显示统计量名称
             self.stats_table.setItem(i, 0, self._create_table_item(stat_name))
-
-            # 填充各列数据
-            for j, (col_name, value) in enumerate(row.items(), start=1):
+            for j, value in enumerate(row, start=1):
                 self.stats_table.setItem(i, j, self._create_table_item(value))
 
-        # 调整列宽
         self.stats_table.resizeColumnsToContents()
 
-    def _display_dtypes(self, dtypes_series):
-        """显示数据类型"""
-        self.dtypes_table.setRowCount(1)
-        self.dtypes_table.setColumnCount(len(dtypes_series))
+    def _refresh_preview(self):
+        """刷新数据预览"""
+        if not hasattr(self, 'current_data') or self.current_data is None:
+            return
+
+        rows = min(self.preview_rows_spin.value(), len(self.current_data))
+        self.preview_table.setRowCount(rows)
+        self.preview_table.setColumnCount(len(self.current_data.columns))
 
         # 设置表头
-        self.dtypes_table.setHorizontalHeaderLabels(dtypes_series.index.tolist())
+        self.preview_table.setHorizontalHeaderLabels(self.current_data.columns.tolist())
 
         # 填充数据
-        for j, (col_name, dtype) in enumerate(dtypes_series.items()):
-            self.dtypes_table.setItem(0, j, self._create_table_item(str(dtype)))
+        for i in range(rows):
+            for j, col in enumerate(self.current_data.columns):
+                value = self.current_data.iloc[i, j]
+                self.preview_table.setItem(i, j, self._create_table_item(value))
 
-        # 调整列宽
-        self.dtypes_table.resizeColumnsToContents()
-
-    def _display_uniques(self, uniques_series):
-        """显示唯一值数量"""
-        self.unique_table.setRowCount(1)
-        self.unique_table.setColumnCount(len(uniques_series))
-
-        # 设置表头
-        self.unique_table.setHorizontalHeaderLabels(uniques_series.index.tolist())
-
-        # 填充数据
-        for j, (col_name, count) in enumerate(uniques_series.items()):
-            self.unique_table.setItem(0, j, self._create_table_item(count))
-
-        # 调整列宽
-        self.unique_table.resizeColumnsToContents()
-
-    def _display_missing(self, missing_series):
-        """显示缺失值数量"""
-        self.missing_table.setRowCount(1)
-        self.missing_table.setColumnCount(len(missing_series))
-
-        # 设置表头
-        self.missing_table.setHorizontalHeaderLabels(missing_series.index.tolist())
-
-        # 填充数据
-        for j, (col_name, count) in enumerate(missing_series.items()):
-            self.missing_table.setItem(0, j, self._create_table_item(count))
-
-        # 调整列宽
-        self.missing_table.resizeColumnsToContents()
+        self.preview_table.resizeColumnsToContents()
 
     def _create_table_item(self, value):
         """创建表格项"""
         item = QTableWidgetItem(str(value))
 
-        # 如果是数值，右对齐
         if isinstance(value, (int, float)):
             item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
         else:
             item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         return item
+
+    def set_current_data(self, data):
+        """设置当前数据集（用于预览）"""
+        self.current_data = data
