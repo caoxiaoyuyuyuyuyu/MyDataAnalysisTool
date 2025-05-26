@@ -221,7 +221,7 @@ class PredictWindow(QDialog):
     def _format_prediction_result(self, predictions, model):
         """格式化预测结果"""
         result_df = self.predict_data.copy()
-        result_df['预测结果'] = predictions
+        result_df[self.target] = predictions
 
         # 添加概率（分类模型）
         if hasattr(model, 'predict_proba'):
